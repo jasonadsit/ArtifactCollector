@@ -40,6 +40,7 @@ function ArtifactCollector {
     } #begin
     process {
         ### region Prep ###
+        $DomainJoined = (Get-CimInstance -ClassName CIM_ComputerSystem).PartOfDomain
         $Domain = [string]([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name)
         $Domain = $Domain.ToUpper()
         $ArtifactDir = "$env:USERPROFILE\Downloads\Artifacts_$Domain`_$(Get-Date -Format yyyyMMdd_hhmm)"
@@ -49,7 +50,7 @@ function ArtifactCollector {
         ### endregion Prep ###
         ### region AD ###
         $Subnets = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Subnets |
-        ForEach-Object{
+        ForEach-Object {
             [pscustomobject][ordered]@{
                 Subnet = [string]$_.Name
                 Site = [string]$_.Site
@@ -125,6 +126,53 @@ function ArtifactCollector {
             }
             Write-Progress @Params
         }
+        if ($PowVer -ge 5) {
+            $GpHt = $GroupPolicies | Group-Object -Property Guid -AsHashTable
+        } elseif ($PowVer -lt 5) {
+            $GpHt = $GroupPolicies | Group-Object -Property Guid | ForEach-Object { @{ $_.Name = $_.Group.Name } }   
+        }
+        $OUs = ([adsisearcher]"(objectCategory=organizationalUnit)").FindAll() |
+        ForEach-Object {
+            $GpLink = [string]$_.Properties.gplink
+            if ($GpLink -match 'LDAP://cn=') {
+                $LinkedGPOs = $_.Properties.gplink.Split('][') | ForEach-Object {
+                    $Guid = $_.Split(';')[0].Trim('[').Split(',')[0] -ireplace 'LDAP://cn=',''
+                    $Name = $GpHt[$Guid].Name
+                    $EnforcedString = [string]$_.Split(';')[-1].Trim(']')
+                    $EnforcedInt = [int]$EnforcedString
+                    if ($EnforcedInt -eq 0) {
+                        $Enforced = $false
+                    } elseif ($EnforcedInt -eq 1) {
+                        $Enforced = $true
+                    }
+                    [pscustomobject][ordered]@{
+                        Name = $Name
+                        Guid = $Guid
+                        Enforced = $Enforced
+                    }
+                }
+            } elseif (-not $GpLink) {
+                $LinkedGPOs = $null
+            }
+            $BlockedInheritanceString = [string]$_.Properties.gpoptions
+            $BlockedInheritanceInt = [int]$BlockedInheritanceString
+            if ($BlockedInheritanceInt -eq 0) {
+                $BlockedInheritance = $false
+            } elseif ($BlockedInheritanceInt -eq 1) {
+                $BlockedInheritance = $true
+            }
+            [pscustomobject][ordered]@{
+                Name = [string]$_.Properties.name
+                DistinguishedName = [string]$_.Properties.distinguishedname
+                LinkedGPOs = $LinkedGPOs
+                BlockedInheritance = $BlockedInheritance
+            }
+            $Params = @{
+                Activity = 'Active Directory: Enumerating OUs'
+                Status = "Now Processing: $([string]$_.Properties.name)"
+            }
+            Write-Progress @Params
+        }
         $AdInfo = [pscustomobject][ordered]@{
             Domain = $Domain
             Subnets = $Subnets
@@ -132,15 +180,11 @@ function ArtifactCollector {
             Users = $Users
             Groups = $Groups
             GroupPolicies = $GroupPolicies
+            OUs = $OUs
         }
         $AdInfo | Export-Clixml -Path .\ActiveDirectory.xml
         ### endregion AD ###
         ### region GPO ###
-        if ($PowVer -ge 5) {
-            $GpHt = $GroupPolicies | Group-Object -Property Guid -AsHashTable
-        } elseif ($PowVer -lt 5) {
-            $GpHt = $GroupPolicies | Group-Object -Property Guid | ForEach-Object { @{ $_.Name = $_.Group.Name } }   
-        }
         $DirName = 'GPO'
         New-Item -Path .\$DirName -ItemType Directory | Out-Null
         $AdInfo.GroupPolicies | Get-Item |
@@ -225,6 +269,35 @@ function ArtifactCollector {
             }
         }
         ### endregion McAfee ###
+        ### region WiFi ###
+        Remove-Variable -Name DirName
+        $DirName = 'WiFi'
+        $Netsh = 'C:\Windows\System32\netsh.exe'
+        $NetshParams = 'wlan show profiles'
+        $Params = @{
+            FilePath = $Netsh
+            ArgumentList = $NetshParams
+            NoNewWindow = $true
+            Wait = $true
+        }
+        $WiFiProfiles = Start-Process @Params | Select-String -Pattern '\ :\ '
+        if ($WiFiProfiles) {
+            New-Item -Path .\$DirName -ItemType Directory | Out-Null
+            $WiFiProfiles = $WiFiProfiles | ForEach-Object {
+                $_.ToString().Split(':')[-1].Trim()
+            }
+            $WiFiProfiles | ForEach-Object {
+                $NetshParams = "wlan export profile name=`"$_`" folder=`".\$DirName`" key=clear"
+                $Params = @{
+                    FilePath = $Netsh
+                    ArgumentList = $NetshParams
+                    NoNewWindow = $true
+                    Wait = $true
+                }
+                Start-Process @Params | Out-Null
+            }
+        }
+        ### endregion WiFi ###
         ### region ZIP ###
         if ($PowVer -ge 5) {
             Compress-Archive -Path $ArtifactDir -DestinationPath $ArtifactDir
@@ -253,8 +326,8 @@ function ArtifactCollector {
             $ShellZip.CopyHere($ArtifactDir)
             Start-Sleep -Seconds 2
         }
-        Pop-Location
         ### endregion ZIP ###
+        Pop-Location
     } #process
     end {
         $GlobalStopwatch.Stop()
