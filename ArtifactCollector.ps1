@@ -4,9 +4,10 @@ function ArtifactCollector {
         Collects artifacts for cyber assessments.
     .DESCRIPTION
         Collects artifacts for cyber assessments.
-        - Active Directory Subnets, Computers, Users, Groups, and Group Policies
+        - Active Directory Subnets, Computers, Users, Groups, Group Policies, and OUs
         - PDQ Inventory database
         - Endpoint Security logs
+        - WiFi Profiles
     .EXAMPLE
         ArtifactCollector
         Collects all artifacts and zips them into an archive for transport.
