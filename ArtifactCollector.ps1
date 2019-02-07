@@ -52,6 +52,8 @@ function ArtifactCollector {
     process {
 
         ### region Prep ###
+        Write-Verbose -Message 'Set dotnet to use TLS 1.2'
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
         $DomainJoined = (Get-CimInstance -ClassName CIM_ComputerSystem).PartOfDomain
 
         $Domain = [string]([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name)
