@@ -540,7 +540,7 @@ function ArtifactCollector {
     end {
 
         $GlobalStopwatch.Stop()
-        $Seconds = $GlobalStopwatch.Elapsed.Seconds
+        $Seconds = [math]::Round($GlobalStopwatch.Elapsed.TotalSeconds)
         $ArtifactZip = Get-Item -Path $ArtifactFile
 
         [pscustomobject][ordered]@{
