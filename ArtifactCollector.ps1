@@ -483,6 +483,7 @@ function ArtifactCollector {
 
             Write-Verbose -Message 'PowerShell 3 or 4 detected, using dotnet to zip the files'
             Add-Type -AssemblyName System.IO.Compression.FileSystem
+
             $Compression = [System.IO.Compression.CompressionLevel]::Optimal
             $Archive = [System.IO.Compression.ZipFile]::Open($ArtifactFile,"Update")
 
@@ -514,11 +515,15 @@ function ArtifactCollector {
         } elseif ($PowVer -le 2) {
 
             Write-Verbose -Message 'PowerShell 2 detected, using a COM object to zip the files'
+            Write-Verbose -Message 'Creating an empty ZIP file'
             Set-Content -Path $ArtifactFile -Value ("PK" + [char]5 + [char]6 + ("$([char]0)" * 18))
+
             $ShellApp = New-Object -ComObject Shell.Application
             $ArtifactZip = Get-Item -Path $ArtifactFile
             $ArtifactZip.IsReadOnly = $false
             $ShellZip = $ShellApp.NameSpace($ArtifactZip.FullName)
+
+            Write-Verbose -Message 'Copy all files into the ZIP'
             $ShellZip.CopyHere($ArtifactDir)
             Start-Sleep -Seconds 2
 
