@@ -59,7 +59,7 @@ function ArtifactCollector {
         $Domain = [string]([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name)
         $Domain = $Domain.ToUpper()
 
-        $ArtifactDir = "$env:USERPROFILE\Downloads\Artifacts_$Domain`_$(Get-Date -Format yyyyMMdd_hhmm)"
+        $ArtifactDir = "$env:USERPROFILE\Downloads\Artifacts_$Domain`_$(Get-Date -Format yyyyMMdd_HHmm)"
         $ArtifactFile = "$ArtifactDir.zip"
 
         New-Item -Path $ArtifactDir -ItemType Directory -Force | Out-Null
