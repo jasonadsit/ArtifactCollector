@@ -5,10 +5,10 @@ function ArtifactCollector {
         Collects artifacts for cyber assessments.
     .DESCRIPTION
         Collects artifacts for cyber assessments.
-        - Active Directory Subnets, Computers, Users, Groups, Group Policies, and OUs
-        - PDQ Inventory database
-        - Endpoint Security logs
-        - WiFi Profiles
+            - Active Directory Subnets, Computers, Users, Groups, Group Policies, and OUs
+            - PDQ Inventory database
+            - Endpoint Security logs
+            - WiFi Profiles
     .EXAMPLE
         ArtifactCollector
         Collects all artifacts and zips them into an archive for transport.
@@ -19,7 +19,6 @@ function ArtifactCollector {
     .NOTES
         #######################################################################################
         Author:     Jason Adsit
-        Version:    1.0
         #######################################################################################
         License:    https://github.com/jasonadsit/ArtifactCollector/blob/master/LICENSE
         #######################################################################################
@@ -30,10 +29,10 @@ function ArtifactCollector {
     .FUNCTIONALITY
         Collects artifacts for cyber assessments using native tools.
         No out-of-box PowerShell modules are required.
-        - Active Directory Subnets, Computers, Users, Groups, Group Policies, and OUs
-        - PDQ Inventory database
-        - Endpoint Security logs
-        - WiFi Profiles
+            - Active Directory Subnets, Computers, Users, Groups, Group Policies, and OUs
+            - PDQ Inventory database
+            - Endpoint Security logs
+            - WiFi Profiles
     #>
 
     [CmdletBinding()]
@@ -42,10 +41,10 @@ function ArtifactCollector {
 
     begin {
 
-        # Start a stopwatch so we know how long the script takes to run
+        Write-Verbose -Message 'Start a stopwatch so we know how long the script takes to run'
         $GlobalStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-        # Determine the PowerShell Version
+        Write-Verbose -Message 'Determine the PowerShell Version'
         $PowVer = $PSVersionTable.PSVersion.Major
 
     } #begin
@@ -66,7 +65,9 @@ function ArtifactCollector {
         ### endregion Prep ###
 
         ### region AD ###
-        $Subnets = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Subnets | ForEach-Object {
+        Write-Verbose -Message 'Start gathering subnets'
+        $Subnets = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Subnets |
+        ForEach-Object {
 
             [pscustomobject][ordered]@{
                 Subnet = [string]$_.Name
@@ -83,6 +84,7 @@ function ArtifactCollector {
 
         } # $Subnets
 
+        Write-Verbose -Message 'Start gathering computers'
         $Computers = ([adsisearcher]"(objectClass=computer)").FindAll() | ForEach-Object {
 
             [pscustomobject][ordered]@{
@@ -100,6 +102,7 @@ function ArtifactCollector {
 
         } # $Computers
 
+        Write-Verbose -Message 'Start gathering users'
         $Users = ([adsisearcher]"(&(objectCategory=person)(objectClass=user))").FindAll() | ForEach-Object {
 
             $SamAccountName = [string]$_.Properties.samaccountname
@@ -129,6 +132,7 @@ function ArtifactCollector {
 
         } # $Users
 
+        Write-Verbose -Message 'Start gathering groups'
         $Groups = ([adsisearcher]"(objectCategory=group)").FindAll() | ForEach-Object {
 
             [pscustomobject][ordered]@{
@@ -146,6 +150,7 @@ function ArtifactCollector {
 
         } # $Groups
 
+        Write-Verbose -Message 'Start gathering GPOs'
         $GroupPolicies = ([adsisearcher]"(objectCategory=groupPolicyContainer)").FindAll() | ForEach-Object {
 
             $GpFsPath = [string]$_.Properties.gpcfilesyspath
@@ -166,20 +171,30 @@ function ArtifactCollector {
 
         } # $GroupPolicies
 
+        Write-Verbose -Message 'Create a hashtable to translate GPO GUIDs to names'
         if ($PowVer -ge 5) {
+
             $GpHt = $GroupPolicies | Group-Object -Property Guid -AsHashTable
+
         } elseif ($PowVer -lt 5) {
+
             $GpHt = $GroupPolicies |
             Group-Object -Property Guid |
             ForEach-Object { @{ $_.Name = $_.Group.Name } }
-        }
 
+        } # $PowVer
+
+        Write-Verbose -Message 'Start gathering OUs'
         $OUs = ([adsisearcher]"(objectCategory=organizationalUnit)").FindAll() | ForEach-Object {
 
             $GpLink = [string]$_.Properties.gplink
 
+            Write-Verbose -Message 'Checking for linked GPOs'
             if ($GpLink -match 'LDAP://cn=') {
 
+                Write-Verbose -Message 'Linked GPOs detected'
+
+                Write-Verbose -Message 'Parsing gplink [string] into [pscustomobject[]]'
                 $LinkedGPOs = $_.Properties.gplink.Split('][') | ForEach-Object {
 
                     $Guid = $_.Split(';')[0].Trim('[').Split(',')[0] -ireplace 'LDAP://cn=',''
@@ -188,9 +203,13 @@ function ArtifactCollector {
                     $EnforcedInt = [int]$EnforcedString
 
                     if ($EnforcedInt -eq 0) {
+
                         $Enforced = $false
+
                     } elseif ($EnforcedInt -eq 1) {
+
                         $Enforced = $true
+
                     }
 
                     [pscustomobject][ordered]@{
@@ -211,9 +230,13 @@ function ArtifactCollector {
             $BlockedInheritanceInt = [int]$BlockedInheritanceString
 
             if ($BlockedInheritanceInt -eq 0) {
+
                 $BlockedInheritance = $false
+
             } elseif ($BlockedInheritanceInt -eq 1) {
+
                 $BlockedInheritance = $true
+
             }
 
             [pscustomobject][ordered]@{
@@ -266,6 +289,7 @@ function ArtifactCollector {
         ### region PDQ ###
         Remove-Variable -Name DirName
         $DirName = 'PDQ'
+
         $PdqDb = "$env:ProgramData\Admin Arsenal\PDQ Inventory\Database.db"
         $PdqPath = Resolve-Path -Path $PdqDb -ErrorAction SilentlyContinue
 
@@ -278,13 +302,18 @@ function ArtifactCollector {
 
             try {
 
+                Write-Verbose -Message 'Copying PDQ Inventory database'
                 $PdqPath | Get-Item | Copy-Item -Destination .\$DirName\
 
             } catch {
 
+                Write-Verbose -Message 'Failed to copy primary PDQ Inventory database'
+
                 try {
 
                     $PdqDbBackup = "$env:ProgramData\Admin Arsenal\PDQ Inventory\Backups\Database.*.db.cab"
+
+                    Write-Verbose -Message 'Copying latest backup of PDQ Inventory database'
                     Resolve-Path -Path $PdqDbBackup -ErrorAction SilentlyContinue |
                     Get-Item | Sort-Object -Property LastWriteTime | Select-Object -Last 1 |
                     Copy-Item -Destination .\$DirName\
@@ -301,17 +330,33 @@ function ArtifactCollector {
         ### region Sophos ###
         Remove-Variable -Name DirName
         $DirName = 'Sophos'
+
         $Sophos = New-Object -TypeName System.Collections.ArrayList
         $SophosPath = "$env:ProgramData\Sophos"
-        $SophosNtp = Resolve-Path -Path "$SophosPath\Sophos Network Threat Protection\Logs\SntpService.log" -ErrorAction SilentlyContinue
-        $SophosAv = Resolve-Path -Path "$SophosPath\Sophos Anti-Virus\Logs\SAV.txt" -ErrorAction SilentlyContinue
+
+        $Params = @{
+            Path = "$SophosPath\Sophos Network Threat Protection\Logs\SntpService.log"
+            ErrorAction = 'SilentlyContinue'
+        }
+
+        $SophosNtp = Resolve-Path @Params
+
+        $Params = @{
+            Path = "$SophosPath\Sophos Anti-Virus\Logs\SAV.txt"
+            ErrorAction = 'SilentlyContinue'
+        }
+
+        $SophosAv = Resolve-Path @Params
+
         $SophosNtp | ForEach-Object { [void]$Sophos.Add($_) }
         $SophosAv | ForEach-Object { [void]$Sophos.Add($_) }
 
         if ($Sophos) {
 
+            Write-Verbose -Message "$DirName logs detected"
             New-Item -Path .\$DirName -ItemType Directory | Out-Null
 
+            Write-Verbose -Message "Copying $DirName logs"
             $Sophos | Get-Item | ForEach-Object {
 
                 $_ | Copy-Item -Destination .\$DirName\
@@ -331,6 +376,7 @@ function ArtifactCollector {
         ### region Symantec ###
         Remove-Variable -Name DirName
         $DirName = 'Symantec'
+
         $Symantec = New-Object -TypeName System.Collections.ArrayList
         $SepLogPath = "$env:ProgramData\Symantec\Symantec Endpoint Protection\CurrentVersion\Data\Logs"
 
@@ -342,8 +388,10 @@ function ArtifactCollector {
 
         if ($Symantec) {
 
+            Write-Verbose -Message "$DirName logs detected"
             New-Item -Path .\$DirName -ItemType Directory | Out-Null
 
+            Write-Verbose -Message "Copying $DirName logs"
             $Symantec | Get-Item | ForEach-Object {
 
                 $_ | Copy-Item -Destination .\$DirName\
@@ -357,12 +405,20 @@ function ArtifactCollector {
         ### region McAfee ###
         Remove-Variable -Name DirName
         $DirName = 'McAfee'
-        $McAfee = Resolve-Path -Path "$env:ProgramData\McAfee\Host Intrusion Prevention\HipShield.log*" -ErrorAction SilentlyContinue
+
+        $Params = @{
+            Path = "$env:ProgramData\McAfee\Host Intrusion Prevention\HipShield.log*"
+            ErrorAction = 'SilentlyContinue'
+        }
+
+        $McAfee = Resolve-Path @Params
 
         if ($McAfee) {
 
+            Write-Verbose -Message "$DirName logs detected"
             New-Item -Path .\$DirName -ItemType Directory | Out-Null
 
+            Write-Verbose -Message "Copying $DirName logs"
             $McAfee | Get-Item | ForEach-Object {
 
                 $_ | Copy-Item -Destination .\$DirName\
@@ -386,16 +442,19 @@ function ArtifactCollector {
             Wait = $true
         }
 
+        Write-Verbose -Message 'Using netsh to enumerate WiFi profiles'
         $WiFiProfiles = Start-Process @Params | Select-String -Pattern '\ :\ '
 
         if ($WiFiProfiles) {
 
+            Write-Verbose -Message 'WiFi profiles found'
             New-Item -Path .\$DirName -ItemType Directory | Out-Null
 
             $WiFiProfiles = $WiFiProfiles | ForEach-Object {
                 $_.ToString().Split(':')[-1].Trim()
             }
 
+            Write-Verbose -Message 'Exporting the WiFi profiles to XML files'
             $WiFiProfiles | ForEach-Object {
 
                 $NetshParams = "wlan export profile name=`"$_`" folder=`".\$DirName`" key=clear"
@@ -417,10 +476,12 @@ function ArtifactCollector {
         ### region ZIP ###
         if ($PowVer -ge 5) {
 
+            Write-Verbose -Message 'PowerShell 5 detected, using built-in cmdlets to zip the files'
             Compress-Archive -Path $ArtifactDir -DestinationPath $ArtifactDir
 
         } elseif (($PowVer -lt 5) -and ($PowVer -gt 2)) {
 
+            Write-Verbose -Message 'PowerShell 3 or 4 detected, using dotnet to zip the files'
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $Compression = [System.IO.Compression.CompressionLevel]::Optimal
             $Archive = [System.IO.Compression.ZipFile]::Open($ArtifactFile,"Update")
@@ -452,6 +513,7 @@ function ArtifactCollector {
 
         } elseif ($PowVer -le 2) {
 
+            Write-Verbose -Message 'PowerShell 2 detected, using a COM object to zip the files'
             Set-Content -Path $ArtifactFile -Value ("PK" + [char]5 + [char]6 + ("$([char]0)" * 18))
             $ShellApp = New-Object -ComObject Shell.Application
             $ArtifactZip = Get-Item -Path $ArtifactFile
