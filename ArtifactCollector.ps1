@@ -434,18 +434,9 @@ function ArtifactCollector {
         ### region WiFi ###
         Remove-Variable -Name DirName
         $DirName = 'WiFi'
-        $Netsh = 'C:\Windows\System32\netsh.exe'
-        $NetshParams = 'wlan show profiles'
-
-        $Params = @{
-            FilePath = $Netsh
-            ArgumentList = $NetshParams
-            NoNewWindow = $true
-            Wait = $true
-        }
 
         Write-Verbose -Message 'Using netsh to enumerate WiFi profiles'
-        $WiFiProfiles = Start-Process @Params | Select-String -Pattern '\ :\ '
+        $WiFiProfiles = netsh wlan show profiles | Select-String -Pattern '\ :\ '
 
         if ($WiFiProfiles) {
 
@@ -459,16 +450,7 @@ function ArtifactCollector {
             Write-Verbose -Message 'Exporting the WiFi profiles to XML files'
             $WiFiProfiles | ForEach-Object {
 
-                $NetshParams = "wlan export profile name=`"$_`" folder=`".\$DirName`" key=clear"
-
-                $Params = @{
-                    FilePath = $Netsh
-                    ArgumentList = $NetshParams
-                    NoNewWindow = $true
-                    Wait = $true
-                }
-
-                Start-Process @Params | Out-Null
+                netsh wlan export profile name="$_" folder=".\$DirName" key=clear
 
             } # $WiFiProfiles
 
