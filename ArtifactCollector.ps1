@@ -20,12 +20,37 @@ function ArtifactCollector {
         #######################################################################################
         Author:     Jason Adsit
         #######################################################################################
-        License:    https://github.com/jasonadsit/ArtifactCollector/blob/master/LICENSE
+        License:    The Unlicence
+
+                    This is free and unencumbered software released into the public domain.
+
+                    Anyone is free to copy, modify, publish, use, compile, sell, or
+                    distribute this software, either in source code form or as a compiled
+                    binary, for any purpose, commercial or non-commercial, and by any
+                    means.
+
+                    In jurisdictions that recognize copyright laws, the author or authors
+                    of this software dedicate any and all copyright interest in the
+                    software to the public domain. We make this dedication for the benefit
+                    of the public at large and to the detriment of our heirs and
+                    successors. We intend this dedication to be an overt act of
+                    relinquishment in perpetuity of all present and future rights to this
+                    software under copyright law.
+
+                    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+                    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+                    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+                    IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+                    OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+                    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+                    OTHER DEALINGS IN THE SOFTWARE.
+
+                    For more information, please refer to <http://unlicense.org>
         #######################################################################################
     .LINK
-        https://jasonadsit.github.io
+        https://github.com/oregon-eso-cyber-assessments/ArtifactCollector
     .LINK
-        https://github.com/jasonadsit/ArtifactCollector
+        https://security.oregon.gov
     .FUNCTIONALITY
         Collects artifacts for cyber assessments using native tools.
         No out-of-box PowerShell modules are required.
@@ -59,7 +84,7 @@ function ArtifactCollector {
         $Domain = [string]([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name)
         $Domain = $Domain.ToUpper()
 
-        $ArtifactDir = "$env:USERPROFILE\Downloads\Artifacts_$Domain`_$(Get-Date -Format yyyyMMdd_HHmm)"
+        $ArtifactDir = "$env:USERPROFILE\Downloads\Artifacts_$(Get-Date -Format yyyyMMdd_HHmm)"
         $ArtifactFile = "$ArtifactDir.zip"
 
         New-Item -Path $ArtifactDir -ItemType Directory -Force | Out-Null
@@ -92,7 +117,10 @@ function ArtifactCollector {
             [pscustomobject][ordered]@{
                 ComputerName = [string]$_.Properties.name
                 OperatingSystem = [string]$_.Properties.operatingsystem
+                DistinguishedName = [string]$_.Properties.distinguishedname
                 Description = [string]$_.Properties.description
+                ServicePrincipalName = $_.Properties.serviceprincipalname
+                MemberOf = $_.Properties.memberof
             }
 
             $Params = @{
@@ -112,16 +140,20 @@ function ArtifactCollector {
             $objSID = $objAct.Translate([System.Security.Principal.SecurityIdentifier])
             $SID = [string]$objSID.Value
 
-            $MemberOf = [string[]]$_.Properties.memberof | ForEach-Object {
-                if ($_ -match 'LDAP://') {
-                    $_.Replace('LDAP://','')
+            $MemberOf = $_.Properties.memberof | ForEach-Object {
+                $EachMember = $_
+                if ($EachMember -match 'LDAP://') {
+                    $EachMember = $EachMember.Replace('LDAP://','')
                 }
+                $EachMember
             }
 
             [pscustomobject][ordered]@{
                 SamAccountName = $SamAccountName
                 UserPrincipalName = [string]$_.Properties.userprincipalname
                 SID = $SID
+                DistinguishedName = [string]$_.Properties.distinguishedname
+                Description = [string]$_.Properties.description
                 MemberOf = $MemberOf
             }
 
@@ -137,10 +169,41 @@ function ArtifactCollector {
         Write-Verbose -Message 'Start gathering groups'
         $Groups = ([adsisearcher]"(objectCategory=group)").FindAll() | ForEach-Object {
 
+            $Member = $_.Properties.member | ForEach-Object {
+                $EachMember = $_
+                if ($EachMember -match 'LDAP://') {
+                    $EachMember = $EachMember.Replace('LDAP://','')
+                }
+                $EachMember
+            }
+
+            $MemberOf = $_.Properties.memberof | ForEach-Object {
+                $EachMember = $_
+                if ($EachMember -match 'LDAP://') {
+                    $EachMember = $EachMember.Replace('LDAP://','')
+                }
+                $EachMember
+            }
+
+            $GroupTypeRaw = $_.Properties.grouptype
+
+            $GroupType = switch -Exact ($GroupTypeRaw) {
+                2 {'Global Distribution Group'}
+                4 {'Domain Local Distribution Group'}
+                8 {'Universal Distribution Group'}
+                -2147483646 {'Global Security Group'}
+                -2147483644 {'Domain Local Security Group'}
+                -2147483643 {'Built-In Group'}
+                -2147483640 {'Universal Security Group'}
+            }
+
             [pscustomobject][ordered]@{
                 SamAccountName = [string]$_.Properties.samaccountname
+                GroupType = $GroupType
                 Description = [string]$_.Properties.description
-                Path = [string]$_.Properties.adspath
+                DistinguishedName = [string]$_.Properties.distinguishedname
+                Member = $Member
+                MemberOf = $MemberOf
             }
 
             $Params = @{
@@ -156,10 +219,11 @@ function ArtifactCollector {
         $GroupPolicies = ([adsisearcher]"(objectCategory=groupPolicyContainer)").FindAll() | ForEach-Object {
 
             $GpFsPath = [string]$_.Properties.gpcfilesyspath
-            $GpGuid = Split-Path -Path $GpFsPath -Leaf
+            $GpGuid = [string](Split-Path -Path $GpFsPath -Leaf)
 
             [pscustomobject][ordered]@{
                 Name = [string]$_.Properties.displayname
+                DistinguishedName = [string]$_.Properties.distinguishedname
                 Path = $GpFsPath
                 Guid = $GpGuid
             }
@@ -189,15 +253,15 @@ function ArtifactCollector {
         Write-Verbose -Message 'Start gathering OUs'
         $OUs = ([adsisearcher]"(objectCategory=organizationalUnit)").FindAll() | ForEach-Object {
 
-            $GpLink = [string]$_.Properties.gplink
+            $GpLink = $_.Properties.gplink
 
             Write-Verbose -Message 'Checking for linked GPOs'
-            if ($GpLink -match 'LDAP://cn=') {
+            if ($GpLink -imatch 'LDAP://cn=') {
 
                 Write-Verbose -Message 'Linked GPOs detected'
 
                 Write-Verbose -Message 'Parsing gplink [string] into [pscustomobject[]]'
-                $LinkedGPOs = $_.Properties.gplink.Split('][') | ForEach-Object {
+                $LinkedGPOs = $GpLink.Split('][') | Where-Object { $_ -imatch 'cn=' } | ForEach-Object {
 
                     $Guid = $_.Split(';')[0].Trim('[').Split(',')[0] -ireplace 'LDAP://cn=',''
                     $Name = $GpHt[$Guid].Name
@@ -244,6 +308,7 @@ function ArtifactCollector {
             [pscustomobject][ordered]@{
                 Name = [string]$_.Properties.name
                 DistinguishedName = [string]$_.Properties.distinguishedname
+                Description = [string]$_.Properties.description
                 LinkedGPOs = $LinkedGPOs
                 BlockedInheritance = $BlockedInheritance
             }
